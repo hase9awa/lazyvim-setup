@@ -6,3 +6,8 @@
 
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/hase9awa/lazyvim-setup/main/install.sh)"
+```
+
+## Linux и macOS
+```powershell
+irm https://raw.githubusercontent.com/hase9awa/lazyvim-setup/main/install.ps1 | iex
