@@ -35,8 +35,18 @@ run_sudo() {
   fi
 }
 
+is_macos() {
+  [ "$(uname -s)" = "Darwin" ]
+}
+
 detect_package_manager() {
-  if command_exists apt-get; then
+  if is_macos; then
+    if command_exists brew; then
+      echo "brew"
+    else
+      echo "macos-no-brew"
+    fi
+  elif command_exists apt-get; then
     echo "apt"
   elif command_exists pacman; then
     echo "pacman"
@@ -57,6 +67,22 @@ detect_package_manager() {
   fi
 }
 
+install_homebrew_on_macos() {
+  if command_exists brew; then
+    return 0
+  fi
+
+  log "Homebrew не найден. Устанавливаю Homebrew."
+
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+  if [ -x "/opt/homebrew/bin/brew" ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  elif [ -x "/usr/local/bin/brew" ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+  fi
+}
+
 install_dependencies() {
   local pm
   pm="$(detect_package_manager)"
@@ -64,6 +90,13 @@ install_dependencies() {
   log "Обнаружен пакетный менеджер: ${pm}"
 
   case "$pm" in
+  macos-no-brew)
+    install_homebrew_on_macos
+    brew install neovim git fzf ripgrep fd curl
+    ;;
+  brew)
+    brew install neovim git fzf ripgrep fd curl
+    ;;
   apt)
     run_sudo apt-get update
     run_sudo apt-get install -y \
@@ -93,9 +126,6 @@ install_dependencies() {
     run_sudo emerge --ask=n \
       app-editors/neovim dev-vcs/git app-shells/fzf sys-apps/ripgrep sys-apps/fd net-misc/curl
     ;;
-  brew)
-    brew install neovim git fzf ripgrep fd curl
-    ;;
   *)
     err "Пакетный менеджер не поддерживается."
     err "Установите зависимости вручную: neovim git fzf ripgrep fd curl"
@@ -103,8 +133,6 @@ install_dependencies() {
     ;;
   esac
 
-  # В Debian/Ubuntu пакет называется fd-find, а бинарник обычно называется fdfind.
-  # Для совместимости создаем ссылку ~/.local/bin/fd.
   if ! command_exists fd && command_exists fdfind; then
     mkdir -p "${HOME}/.local/bin"
     ln -sf "$(command -v fdfind)" "${HOME}/.local/bin/fd"
@@ -114,11 +142,10 @@ install_dependencies() {
 }
 
 version_ge() {
-  # Возвращает true, если версия $1 больше или равна $2.
   [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1)" = "$2" ]
 }
 
-install_latest_neovim_appimage() {
+install_latest_neovim_appimage_linux() {
   local arch
   arch="$(uname -m)"
 
@@ -137,7 +164,6 @@ install_latest_neovim_appimage() {
     -o "${HOME}/.local/bin/nvim"
 
   chmod +x "${HOME}/.local/bin/nvim"
-
   export PATH="${HOME}/.local/bin:${PATH}"
 
   log "Установлен Neovim: $(${HOME}/.local/bin/nvim --version | head -n1)"
@@ -146,7 +172,13 @@ install_latest_neovim_appimage() {
 ensure_neovim_version() {
   if ! command_exists nvim; then
     warn "Команда nvim не найдена после установки зависимостей."
-    install_latest_neovim_appimage
+
+    if is_macos; then
+      err "На macOS попробуйте выполнить: brew install neovim"
+      exit 1
+    fi
+
+    install_latest_neovim_appimage_linux
     return
   fi
 
@@ -157,8 +189,14 @@ ensure_neovim_version() {
     log "Версия Neovim подходит: ${current}"
   else
     warn "Установленная версия Neovim ${current} старше требуемой ${MIN_NVIM_VERSION}."
-    warn "Устанавливаю последнюю стабильную версию Neovim AppImage."
-    install_latest_neovim_appimage
+
+    if is_macos; then
+      log "Обновляю Neovim через Homebrew."
+      brew upgrade neovim || brew install neovim
+    else
+      warn "Устанавливаю последнюю стабильную версию Neovim AppImage."
+      install_latest_neovim_appimage_linux
+    fi
   fi
 }
 

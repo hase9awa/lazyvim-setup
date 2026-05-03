@@ -1,8 +1,8 @@
 # lazyvim-setup
 
-Скрипт для автоматической установки и настройки LazyVim на Linux.
+Скрипты для автоматической установки и настройки LazyVim на Linux, macOS и Windows.
 
-## Установка одной командой
+## Linux и macOS
 
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/hase9awa/lazyvim-setup/main/install.sh)"
