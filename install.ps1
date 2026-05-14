@@ -1,8 +1,21 @@
 $ErrorActionPreference = "Stop"
 
-$RepoUrl = "https://github.com/LazyVim/starter"
+$ConfigRepoUrl = if ($env:CONFIG_REPO_URL) {
+    $env:CONFIG_REPO_URL
+} else {
+    "https://github.com/hase9awa/lazyvim-config.git"
+}
+
+$ConfigRepoBranch = if ($env:CONFIG_REPO_BRANCH) {
+    $env:CONFIG_REPO_BRANCH
+} else {
+    "main"
+}
+
 $NvimConfigDir = Join-Path $env:LOCALAPPDATA "nvim"
 $NvimDataDir = Join-Path $env:LOCALAPPDATA "nvim-data"
+$NvimStateDir = Join-Path $env:LOCALAPPDATA "nvim-state"
+$NvimCacheDir = Join-Path $env:LOCALAPPDATA "nvim-cache"
 
 function Log {
     param([string]$Message)
@@ -72,12 +85,8 @@ function Backup-Path {
         return
     }
 
-    $Backup = "$Path.bak"
-
-    if (Test-Path $Backup) {
-        $Timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-        $Backup = "$Path.bak-$Timestamp"
-    }
+    $Timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $Backup = "$Path.bak-$Timestamp"
 
     Log "Создаю бэкап: $Path -> $Backup"
     Move-Item -Path $Path -Destination $Backup
@@ -88,59 +97,28 @@ function Backup-NeovimFiles {
 
     Backup-Path $NvimConfigDir
     Backup-Path $NvimDataDir
+    Backup-Path $NvimStateDir
+    Backup-Path $NvimCacheDir
 }
 
-function Install-LazyVim {
-    Log "Клонирую LazyVim starter"
+function Install-LazyVimConfig {
+    Log "Клонирую конфигурацию LazyVim"
+    Log "Репозиторий: $ConfigRepoUrl"
+    Log "Ветка: $ConfigRepoBranch"
 
-    git clone $RepoUrl $NvimConfigDir
+    git clone --depth 1 --branch $ConfigRepoBranch $ConfigRepoUrl $NvimConfigDir
 
-    $GitDir = Join-Path $NvimConfigDir ".git"
+    $InitLua = Join-Path $NvimConfigDir "init.lua"
 
-    if (Test-Path $GitDir) {
-        Log "Удаляю .git из установленной конфигурации LazyVim"
-        Remove-Item -Recurse -Force $GitDir
+    if (-not (Test-Path $InitLua)) {
+        Warn "В репозитории не найден init.lua."
+        Warn "Для LazyVim желательно хранить полный конфиг Neovim в корне репозитория:"
+        Warn "  init.lua"
+        Warn "  lua/config/..."
+        Warn "  lua/plugins/..."
     }
-}
 
-function Configure-LazyVim {
-    Log "Записываю пользовательскую конфигурацию LazyVim"
-
-    $ConfigDir = Join-Path $NvimConfigDir "lua\config"
-    $PluginsDir = Join-Path $NvimConfigDir "lua\plugins"
-
-    New-Item -ItemType Directory -Force -Path $ConfigDir | Out-Null
-    New-Item -ItemType Directory -Force -Path $PluginsDir | Out-Null
-
-    $KeymapsPath = Join-Path $ConfigDir "keymaps.lua"
-    $ColorschemePath = Join-Path $PluginsDir "colorscheme.lua"
-
-@'
--- Выход из режима вставки по jj
-vim.keymap.set("i", "jj", "<Esc>", { desc = "Exit insert mode" })
-'@ | Set-Content -Path $KeymapsPath -Encoding UTF8
-
-@'
-return {
-  {
-    "hase9awa/kanagawa.nvim",
-    opts = {
-      transparent = true,
-      styles = {
-        sidebars = "transparent",
-        floats = "transparent",
-      },
-    },
-  },
-
-  {
-    "LazyVim/LazyVim",
-    opts = {
-      colorscheme = "kanagawa",
-    },
-  },
-}
-'@ | Set-Content -Path $ColorschemePath -Encoding UTF8
+    Log "Конфигурация установлена в $NvimConfigDir"
 }
 
 function Sync-LazyVim {
@@ -172,7 +150,6 @@ if (-not (Command-Exists nvim)) {
 }
 
 Backup-NeovimFiles
-Install-LazyVim
-Configure-LazyVim
+Install-LazyVimConfig
 Sync-LazyVim
 Start-Neovim

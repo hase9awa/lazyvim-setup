@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_URL="https://github.com/LazyVim/starter"
+CONFIG_REPO_URL="${CONFIG_REPO_URL:-https://github.com/hase9awa/lazyvim-config.git}"
+CONFIG_REPO_BRANCH="${CONFIG_REPO_BRANCH:-main}"
+
 NVIM_CONFIG_DIR="${HOME}/.config/nvim"
 MIN_NVIM_VERSION="0.11.2"
 
@@ -92,10 +94,10 @@ install_dependencies() {
   case "$pm" in
   macos-no-brew)
     install_homebrew_on_macos
-    brew install neovim git fzf ripgrep fd curl
+    brew install neovim git fzf ripgrep fd curl ca-certificates
     ;;
   brew)
-    brew install neovim git fzf ripgrep fd curl
+    brew install neovim git fzf ripgrep fd curl ca-certificates
     ;;
   apt)
     run_sudo apt-get update
@@ -124,11 +126,11 @@ install_dependencies() {
     ;;
   emerge)
     run_sudo emerge --ask=n \
-      app-editors/neovim dev-vcs/git app-shells/fzf sys-apps/ripgrep sys-apps/fd net-misc/curl
+      app-editors/neovim dev-vcs/git app-shells/fzf sys-apps/ripgrep sys-apps/fd net-misc/curl app-misc/ca-certificates
     ;;
   *)
     err "Пакетный менеджер не поддерживается."
-    err "Установите зависимости вручную: neovim git fzf ripgrep fd curl"
+    err "Установите зависимости вручную: neovim git fzf ripgrep fd curl ca-certificates"
     exit 1
     ;;
   esac
@@ -207,13 +209,10 @@ backup_path() {
     return 0
   fi
 
-  local backup="${path}.bak"
   local timestamp
+  local backup
   timestamp="$(date +%Y%m%d-%H%M%S)"
-
-  if [ -e "$backup" ]; then
-    backup="${path}.bak-${timestamp}"
-  fi
+  backup="${path}.bak-${timestamp}"
 
   log "Создаю бэкап: ${path} -> ${backup}"
   mv "$path" "$backup"
@@ -228,51 +227,33 @@ backup_neovim_files() {
   backup_path "${HOME}/.cache/nvim"
 }
 
-install_lazyvim() {
-  log "Клонирую LazyVim starter"
+install_lazyvim_config() {
+  log "Клонирую конфигурацию LazyVim"
+  log "Репозиторий: ${CONFIG_REPO_URL}"
+  log "Ветка: ${CONFIG_REPO_BRANCH}"
+
   mkdir -p "${HOME}/.config"
-  git clone "$REPO_URL" "$NVIM_CONFIG_DIR"
 
-  log "Удаляю .git из установленной конфигурации LazyVim"
-  rm -rf "${NVIM_CONFIG_DIR}/.git"
-}
+  git clone \
+    --depth 1 \
+    --branch "${CONFIG_REPO_BRANCH}" \
+    "${CONFIG_REPO_URL}" \
+    "${NVIM_CONFIG_DIR}"
 
-configure_lazyvim() {
-  log "Записываю пользовательскую конфигурацию LazyVim"
+  if [ ! -f "${NVIM_CONFIG_DIR}/init.lua" ]; then
+    warn "В репозитории не найден init.lua."
+    warn "Для LazyVim желательно хранить полный конфиг Neovim в корне репозитория:"
+    warn "  init.lua"
+    warn "  lua/config/..."
+    warn "  lua/plugins/..."
+  fi
 
-  mkdir -p "${NVIM_CONFIG_DIR}/lua/config"
-  mkdir -p "${NVIM_CONFIG_DIR}/lua/plugins"
-
-  cat >"${NVIM_CONFIG_DIR}/lua/config/keymaps.lua" <<'EOF'
--- Выход из режима вставки по jj
-vim.keymap.set("i", "jj", "<Esc>", { desc = "Exit insert mode" })
-EOF
-
-  cat >"${NVIM_CONFIG_DIR}/lua/plugins/colorscheme.lua" <<'EOF'
-return {
-  {
-    "hase9awa/kanagawa.nvim",
-    opts = {
-      transparent = true,
-      styles = {
-        sidebars = "transparent",
-        floats = "transparent",
-      },
-    },
-  },
-
-  {
-    "LazyVim/LazyVim",
-    opts = {
-      colorscheme = "kanagawa",
-    },
-  },
-}
-EOF
+  log "Конфигурация установлена в ${NVIM_CONFIG_DIR}"
 }
 
 sync_lazyvim() {
   log "Запускаю Lazy sync"
+
   nvim --headless "+Lazy! sync" +qa || {
     warn "Не удалось выполнить Lazy sync в headless-режиме."
     warn "После открытия Neovim можно выполнить команду :Lazy sync вручную."
@@ -288,8 +269,7 @@ main() {
   install_dependencies
   ensure_neovim_version
   backup_neovim_files
-  install_lazyvim
-  configure_lazyvim
+  install_lazyvim_config
   sync_lazyvim
   start_neovim
 }
