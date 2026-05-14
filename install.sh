@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+LAZYVIM_STARTER_REPO_URL="${LAZYVIM_STARTER_REPO_URL:-https://github.com/LazyVim/starter.git}"
 CONFIG_REPO_URL="${CONFIG_REPO_URL:-https://github.com/hase9awa/lazyvim-config.git}"
 CONFIG_REPO_BRANCH="${CONFIG_REPO_BRANCH:-main}"
 
@@ -94,43 +95,43 @@ install_dependencies() {
   case "$pm" in
   macos-no-brew)
     install_homebrew_on_macos
-    brew install neovim git fzf ripgrep fd curl ca-certificates
+    brew install neovim git fzf ripgrep fd curl ca-certificates rsync
     ;;
   brew)
-    brew install neovim git fzf ripgrep fd curl ca-certificates
+    brew install neovim git fzf ripgrep fd curl ca-certificates rsync
     ;;
   apt)
     run_sudo apt-get update
     run_sudo apt-get install -y \
-      neovim git fzf ripgrep fd-find curl ca-certificates
+      neovim git fzf ripgrep fd-find curl ca-certificates rsync
     ;;
   pacman)
     run_sudo pacman -Syu --needed --noconfirm \
-      neovim git fzf ripgrep fd curl ca-certificates
+      neovim git fzf ripgrep fd curl ca-certificates rsync
     ;;
   dnf)
     run_sudo dnf install -y \
-      neovim git fzf ripgrep fd-find curl ca-certificates
+      neovim git fzf ripgrep fd-find curl ca-certificates rsync
     ;;
   zypper)
     run_sudo zypper --non-interactive install \
-      neovim git fzf ripgrep fd curl ca-certificates
+      neovim git fzf ripgrep fd curl ca-certificates rsync
     ;;
   apk)
     run_sudo apk add --no-cache \
-      neovim git fzf ripgrep fd curl ca-certificates
+      neovim git fzf ripgrep fd curl ca-certificates rsync
     ;;
   xbps)
     run_sudo xbps-install -Sy \
-      neovim git fzf ripgrep fd curl ca-certificates
+      neovim git fzf ripgrep fd curl ca-certificates rsync
     ;;
   emerge)
     run_sudo emerge --ask=n \
-      app-editors/neovim dev-vcs/git app-shells/fzf sys-apps/ripgrep sys-apps/fd net-misc/curl app-misc/ca-certificates
+      app-editors/neovim dev-vcs/git app-shells/fzf sys-apps/ripgrep sys-apps/fd net-misc/curl net-misc/rsync
     ;;
   *)
     err "Пакетный менеджер не поддерживается."
-    err "Установите зависимости вручную: neovim git fzf ripgrep fd curl ca-certificates"
+    err "Установите зависимости вручную: neovim git fzf ripgrep fd curl ca-certificates rsync"
     exit 1
     ;;
   esac
@@ -139,6 +140,7 @@ install_dependencies() {
     mkdir -p "${HOME}/.local/bin"
     ln -sf "$(command -v fdfind)" "${HOME}/.local/bin/fd"
     export PATH="${HOME}/.local/bin:${PATH}"
+    hash -r
     log "Создана ссылка: ~/.local/bin/fd -> fdfind"
   fi
 }
@@ -167,6 +169,7 @@ install_latest_neovim_appimage_linux() {
 
   chmod +x "${HOME}/.local/bin/nvim"
   export PATH="${HOME}/.local/bin:${PATH}"
+  hash -r
 
   log "Установлен Neovim: $(${HOME}/.local/bin/nvim --version | head -n1)"
 }
@@ -187,6 +190,12 @@ ensure_neovim_version() {
   local current
   current="$(nvim --version | head -n1 | sed -E 's/.*v?([0-9]+\.[0-9]+\.[0-9]+).*/\1/')"
 
+  if [ -z "$current" ]; then
+    warn "Не удалось определить версию Neovim."
+    warn "Текущая версия: $(nvim --version | head -n1)"
+    return
+  fi
+
   if version_ge "$current" "$MIN_NVIM_VERSION"; then
     log "Версия Neovim подходит: ${current}"
   else
@@ -195,6 +204,7 @@ ensure_neovim_version() {
     if is_macos; then
       log "Обновляю Neovim через Homebrew."
       brew upgrade neovim || brew install neovim
+      hash -r
     else
       warn "Устанавливаю последнюю стабильную версию Neovim AppImage."
       install_latest_neovim_appimage_linux
@@ -227,28 +237,52 @@ backup_neovim_files() {
   backup_path "${HOME}/.cache/nvim"
 }
 
-install_lazyvim_config() {
-  log "Клонирую конфигурацию LazyVim"
-  log "Репозиторий: ${CONFIG_REPO_URL}"
-  log "Ветка: ${CONFIG_REPO_BRANCH}"
+install_lazyvim_starter() {
+  log "Клонирую LazyVim starter"
+  log "Репозиторий: ${LAZYVIM_STARTER_REPO_URL}"
 
   mkdir -p "${HOME}/.config"
 
   git clone \
     --depth 1 \
-    --branch "${CONFIG_REPO_BRANCH}" \
-    "${CONFIG_REPO_URL}" \
+    "${LAZYVIM_STARTER_REPO_URL}" \
     "${NVIM_CONFIG_DIR}"
 
-  if [ ! -f "${NVIM_CONFIG_DIR}/init.lua" ]; then
-    warn "В репозитории не найден init.lua."
-    warn "Для LazyVim желательно хранить полный конфиг Neovim в корне репозитория:"
-    warn "  init.lua"
-    warn "  lua/config/..."
-    warn "  lua/plugins/..."
+  rm -rf "${NVIM_CONFIG_DIR}/.git"
+
+  log "LazyVim starter установлен в ${NVIM_CONFIG_DIR}"
+}
+
+apply_user_config() {
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+
+  log "Клонирую пользовательскую конфигурацию"
+  log "Репозиторий: ${CONFIG_REPO_URL}"
+  log "Ветка: ${CONFIG_REPO_BRANCH}"
+
+  git clone \
+    --depth 1 \
+    --branch "${CONFIG_REPO_BRANCH}" \
+    "${CONFIG_REPO_URL}" \
+    "${tmp_dir}"
+
+  rm -rf "${tmp_dir}/.git"
+
+  log "Накатываю пользовательскую конфигурацию поверх LazyVim starter"
+
+  if command_exists rsync; then
+    rsync -a \
+      --exclude ".git" \
+      "${tmp_dir}/" \
+      "${NVIM_CONFIG_DIR}/"
+  else
+    cp -R "${tmp_dir}/." "${NVIM_CONFIG_DIR}/"
   fi
 
-  log "Конфигурация установлена в ${NVIM_CONFIG_DIR}"
+  rm -rf "${tmp_dir}"
+
+  log "Пользовательская конфигурация применена"
 }
 
 sync_lazyvim() {
@@ -269,7 +303,8 @@ main() {
   install_dependencies
   ensure_neovim_version
   backup_neovim_files
-  install_lazyvim_config
+  install_lazyvim_starter
+  apply_user_config
   sync_lazyvim
   start_neovim
 }
