@@ -1,5 +1,11 @@
 $ErrorActionPreference = "Stop"
 
+$LazyVimStarterRepoUrl = if ($env:LAZYVIM_STARTER_REPO_URL) {
+    $env:LAZYVIM_STARTER_REPO_URL
+} else {
+    "https://github.com/LazyVim/starter.git"
+}
+
 $ConfigRepoUrl = if ($env:CONFIG_REPO_URL) {
     $env:CONFIG_REPO_URL
 } else {
@@ -75,6 +81,15 @@ function Install-Dependencies {
 function Refresh-Path {
     $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+
+    if ([string]::IsNullOrWhiteSpace($machinePath)) {
+        $machinePath = ""
+    }
+
+    if ([string]::IsNullOrWhiteSpace($userPath)) {
+        $userPath = ""
+    }
+
     $env:Path = "$machinePath;$userPath"
 }
 
@@ -101,24 +116,44 @@ function Backup-NeovimFiles {
     Backup-Path $NvimCacheDir
 }
 
-function Install-LazyVimConfig {
-    Log "Клонирую конфигурацию LazyVim"
+function Install-LazyVimStarter {
+    Log "Клонирую LazyVim starter"
+    Log "Репозиторий: $LazyVimStarterRepoUrl"
+
+    git clone --depth 1 $LazyVimStarterRepoUrl $NvimConfigDir
+
+    $GitDir = Join-Path $NvimConfigDir ".git"
+
+    if (Test-Path $GitDir) {
+        Log "Удаляю .git из установленной конфигурации LazyVim"
+        Remove-Item -Recurse -Force $GitDir
+    }
+
+    Log "LazyVim starter установлен в $NvimConfigDir"
+}
+
+function Apply-UserConfig {
+    $TempDir = Join-Path $env:TEMP ("lazyvim-config-" + [guid]::NewGuid().ToString())
+
+    Log "Клонирую пользовательскую конфигурацию"
     Log "Репозиторий: $ConfigRepoUrl"
     Log "Ветка: $ConfigRepoBranch"
 
-    git clone --depth 1 --branch $ConfigRepoBranch $ConfigRepoUrl $NvimConfigDir
+    git clone --depth 1 --branch $ConfigRepoBranch $ConfigRepoUrl $TempDir
 
-    $InitLua = Join-Path $NvimConfigDir "init.lua"
+    $TempGitDir = Join-Path $TempDir ".git"
 
-    if (-not (Test-Path $InitLua)) {
-        Warn "В репозитории не найден init.lua."
-        Warn "Для LazyVim желательно хранить полный конфиг Neovim в корне репозитория:"
-        Warn "  init.lua"
-        Warn "  lua/config/..."
-        Warn "  lua/plugins/..."
+    if (Test-Path $TempGitDir) {
+        Remove-Item -Recurse -Force $TempGitDir
     }
 
-    Log "Конфигурация установлена в $NvimConfigDir"
+    Log "Накатываю пользовательскую конфигурацию поверх LazyVim starter"
+
+    Copy-Item -Path (Join-Path $TempDir "*") -Destination $NvimConfigDir -Recurse -Force
+
+    Remove-Item -Recurse -Force $TempDir
+
+    Log "Пользовательская конфигурация применена"
 }
 
 function Sync-LazyVim {
@@ -150,6 +185,7 @@ if (-not (Command-Exists nvim)) {
 }
 
 Backup-NeovimFiles
-Install-LazyVimConfig
+Install-LazyVimStarter
+Apply-UserConfig
 Sync-LazyVim
 Start-Neovim
